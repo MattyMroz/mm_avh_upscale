@@ -1,282 +1,119 @@
-# Jak pobrać FFmpeg w Windows
-# https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z -- auto pobieranie
-# Zmienne środowiskowe użytkownika -> w PATH dodaj ścieżkę do folderu: C:\FFmpeg\bin
-# cmd ffmpeg -version - czy działa
-# pip install opencv-python
-# pip install pillow
-# pip install termcolor
-import subprocess
-import time
-from PIL import Image
-import cv2
+from dataclasses import dataclass, field
 import os
-from termcolor import cprint
+import subprocess
+from typing import List, Optional
+from utils.constants import console
+from utils.execution_timer import execution_timer
 
 
-def cmd(command):
-    subprocess.call(command, shell=True)
+@dataclass(slots=True)
+class ImageUpscaler:
+    input_path: str = "./input"
+    output_path: str = "./output"
+    scale: int = 4
+    tile_size: int = 0
+    model_path: str = "models"
+    model_name: str = "realesr-animevideov3-x2"
+    gpu_id: str = "auto"
+    threads: str = "1:2:2"
+    tta_mode: bool = False
+    output_format: str = "png"
+    verbose: bool = False
 
+    def set_config(self, **kwargs: dict) -> None:
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
 
-def hight_quality_image_real_esrgan_x4_plus_anime():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./input -o ./output -n realesrgan-x4plus-anime')
+    def _get_command(self) -> List[str]:
+        executable: str = "realesrgan-ncnn-vulkan.exe" if os.name == "nt" else "realesrgan-ncnn-vulkan"
+        command: List[str] = [
+            executable,
+            "-i", self.input_path,
+            "-o", self.output_path,
+            "-s", str(self.scale),
+            "-t", str(self.tile_size),
+            "-m", self.model_path,
+            "-n", self.model_name,
+            "-g", self.gpu_id,
+            "-j", self.threads,
+            "-f", self.output_format
+        ]
+        if self.tta_mode:
+            command.append("-x")
+        if self.verbose:
+            command.append("-v")
+        return command
 
+    def upscale_folder(self, input_folder: str, output_folder: str) -> bool:
+        self.input_path = input_folder
+        self.output_path = output_folder
+        command: List[str] = self._get_command()
 
-def fast_image_real_esrgan_animevideov3_x4():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./input -o ./output -n realesr-animevideov3-x4')
+        try:
+            subprocess.run(command, check=True, text=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            console.print(f"Błąd podczas upskalowania: {e}", style="red_bold")
+            console.print(
+                f"Wyjście standardowe: {e.stdout}", style="red_italic")
+            console.print(f"Wyjście błędów: {e.stderr}", style="red_italic")
+            return False
 
+    def _scan_models(self) -> List[str]:
+        models: List[str] = []
+        for file in os.listdir(self.model_path):
+            if file.endswith(".bin"):
+                models.append(file[:-4])
+        return models
 
-def fast_image_real_esrgan_animevideov3_x4_jpg():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./input -o ./output -n realesr-animevideov3-x4 -f jpg')
-
-
-def slow_image_real_esrgan_x4_plus():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./input -o ./output -n realesrgan-x4plus')
-
-
-def clean():
-    # Usuń folder tmp_frames i out_frames
-    cmd('rmdir /s /q tmp_frames')
-    cmd('rmdir /s /q out_frames')
-
-    # Przywróć folder tmp_frames i out_frames
-    cmd('mkdir tmp_frames')
-    cmd('mkdir out_frames')
-
-
-def add_info():
-    # Dodaj info o plkiu wideo
-    filename = input("Podaj nazwę pliku np.: 1.mp4: ")
-
-    print("FPS: ")
-    cmd('ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 ./input/' + filename)
-
-    print("Wpisz powyższą ilość FPS np.: 500: ")
-    fps = input("Podaj ilość FPS: ")
-
-    return filename, fps
-
-
-def video_to_frames(filename):
-    # FFmpeg pobierze klatki z wideo i zapisze je w folderze tmp_frames
-    cmd('ffmpeg -i ./input/' + filename +
-        ' -qscale:v 1 -qmin 1 -qmax 1 -vsync 0 ./tmp_frames/frame%08d.jpg')
-
-
-def fast_image_real_esrgan_animevideov3_x4_jpg_with_temp_folder():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./tmp_frames -o ./out_frames -n realesr-animevideov3-x4 -f jpg')
-
-
-def fast_image_real_esrgan_animevideov3_x3_jpg_with_temp_folder():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./tmp_frames -o ./out_frames -n realesr-animevideov3-x3 -f jpg')
-
-
-def fast_image_real_esrgan_animevideov3_x2_jpg_with_temp_folder():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./tmp_frames -o ./out_frames -n realesr-animevideov3-x2 -f jpg')
-
-
-def hight_quality_image_real_esrgan_x4_plus_animevideo():
-    cmd('realesrgan-ncnn-vulkan.exe -i ./tmp_frames -o ./out_frames -n realesrgan-x4plus-anime')
-
-
-def reduce_image_size(image_path, output_folder, max_size_in_mb, max_size_in_px):
-    try:
-        with Image.open(image_path) as image:
-            image = image.convert("RGB")
-            width, height = image.size
-            if width > max_size_in_px or height > max_size_in_px:
-                scale = max_size_in_px / max(width, height)
-                new_width = int(width * scale)
-                new_height = int(height * scale)
-                image = image.resize((new_width, new_height))
-
-            output_path = os.path.join(
-                output_folder, os.path.basename(image_path))
-            quality = 95
-            while True:
-                image.save(output_path, format='JPEG', quality=quality)
-                if os.stat(output_path).st_size <= max_size_in_mb * 1024 * 1024:
-                    break
-                quality -= 5
-        return output_path
-    except Exception as e:
-        print('*_* ' + str(e))
-        image = cv2.imread(image_path)
-        height, width = image.shape[:2]
-        if width > max_size_in_px or height > max_size_in_px:
-            scale = max_size_in_px / max(width, height)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            image = cv2.resize(image, (new_width, new_height))
-        output_path = os.path.join(
-            output_folder, os.path.basename(image_path))
-        temp_folder = './output/temp'
-        if not os.path.exists(temp_folder):
-            os.makedirs(temp_folder)
+    def _set_model(self, model_name: str) -> None:
+        if model_name in self._scan_models():
+            self.model_name = model_name
+            console.print(f"Wybrano model: {model_name}", style="green_bold")
         else:
-            for filename in os.listdir(temp_folder):
-                os.remove(os.path.join(temp_folder, filename))
-        output_path = os.path.join(temp_folder, os.path.basename(image_path))
-        cv2.imwrite(output_path, image)
-        process_images_in_folder(
-            temp_folder, './output/', max_size_in_mb, max_size_in_px)
-        return output_path
+            raise ValueError(f"Model {model_name} nie istnieje.")
+
+    def choose_model(self) -> None:
+        models: List[str] = self._scan_models()
+        console.print("Dostępne modele:", style="yellow_bold")
+        for i, model in enumerate(models, 1):
+            console.print(f"{i}. {model}")
+
+        while True:
+            try:
+                choice: int = int(input("Wybierz numer modelu: ")) - 1
+                if 0 <= choice < len(models):
+                    self._set_model(models[choice])
+                    break
+                else:
+                    console.print(
+                        "Nieprawidłowy numer. Spróbuj ponownie.", style="red_bold")
+            except ValueError:
+                console.print("Wprowadź poprawny numer.", style="red_bold")
 
 
-def process_images_in_folder(folder_path, output_folder, max_size_in_mb, max_size_in_px):
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+@execution_timer
+def main() -> None:
+    upscaler: ImageUpscaler = ImageUpscaler()
 
-    for filename in os.listdir(folder_path):
-        extensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.eps', '.gif',
-                      '.ico', '.msp', '.pcx', '.ppm', '.spider', '.tif', '.tiff', '.xbm', '.xpm']
-        if filename.endswith(tuple(extensions)):
-            print(filename)
-            image_path = os.path.join(folder_path, filename)
-            reduce_image_size(image_path, output_folder,
-                              max_size_in_mb, max_size_in_px)
+    # Wybór modelu
+    upscaler.choose_model()
 
+    # Konfiguracja
+    upscaler.set_config(output_format="png")
 
-def smaller_image():
-    max_size_in_mb = float(
-        input("Podaj ile MB nie może przekroczyć plik np.: 8: ") or 8)
-    max_size_in_px = int(input(
-        "Podaj długość największej krawędzi w px np.: 1024, 2048, 4096, 8192: ") or 4096)
-    process_images_in_folder('./input/', './output/',
-                             max_size_in_mb, max_size_in_px)
+    # Upskalowanie folderu z obrazami
+    input_folder: str = "./input"
+    output_folder: str = "./output"
 
-
-def frames_to_video_with_sound(filename, fps):
-    # Połączenie ulepszonych klatek z powrotem w wideo, gdzie dźwięk zostanie skopiowany z pierwotnego wideo, nie obsługuje napisów
-    # TRYB NORMALNY
-    cmd('ffmpeg -r ' + fps + ' -i ./out_frames/frame%08d.jpg -i ./input/' + filename + ' -map 0:v:0? -map 1:a:0? -c:a copy -c:v libx264 -r ' +
-        fps + ' -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 ./output/' + filename)
-
-    # TRYB WALKI
-    # cmd('ffmpeg -r ' + fps + ' -i ./out_frames/frame%08d.jpg -i ./input/' + filename + ' -map 0:v:0? -map 1:a:0? \
-    # -filter_complex "[0:v]eq=contrast=1.1:brightness=-0.05:saturation=1.3,hqdn3d" \
-    # -c:a copy -c:v libx264 -r ' + fps + ' -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 ./output/' + filename + '_TW.mp4')
-
-    # TRYB SPORT
-    # cmd('ffmpeg -r ' + fps + ' -i ./out_frames/frame%08d.jpg -i ./input/' + filename + ' -map 0:v:0? -map 1:a:0? \
-    # -filter_complex "[0:v]eq=contrast=1.2:brightness=-0.1:saturation=1.5,hqdn3d" \
-    # -c:a copy -c:v libx264 -r ' + fps + ' -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 ./output/' + filename + '_TS.mp4')
-
-    # ŚCIĄGA:
-    # TRYB ZWYKŁY -pix_fmt yuv420p
-    # JAKOŚĆ I WIELKOŚĆ-crf 0 do 51, najwyższa jakość 0, najniższa jakość 51 (może powodować błędy w obrazie)
-    # SZYBKOŚĆ I ODWROTNIE PROPORCJONALNA WIELKOSĆ -preset ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow, placebo (może powodować błędy w obrazie)
-    # IDENTYCZNE KOLORY -color_primaries bt709 -color_trc bt709 -colorspace bt709
-    # -filter_complex "[0:v]eq=contrast=1:brightness=1:saturation=1,hqdn3d" - filtry kolorów
-
-
-def video_info():
-    # Informacje o wideo
-    filename = input("Podaj nazwę pliku np.: 1.mp4: ")
-    cmd('ffmpeg -i ./input/' + filename)
-
-
-def audio_with_image():
-    input_dir = "./input"
-    output_dir = "./output"
-    image_path = os.path.join(
-        input_dir, "0_src", os.listdir(os.path.join(input_dir, "0_src"))[0])
-
-    for filename in os.listdir(input_dir):
-        if filename.endswith(".mp3") or filename.endswith(".eac3"):
-            input_file_path = os.path.join(input_dir, filename)
-            output_file_path = os.path.join(
-                output_dir, os.path.splitext(filename)[0] + ".mp4")
-            cmd('ffmpeg -loop 1 -i ' + image_path + ' -i ' +
-                input_file_path + ' -c:a copy -shortest ' + output_file_path)
-            print(f"Przetworzono plik {input_file_path}")
-            time.sleep(1)
-
-
-def main():
-    start_time = time.time()
-    # red green yellow white attrs=['bold']
-    cprint("╚═══ Multimedia Magic – Audio Visual Heaven ═══╝",
-           'white', attrs=['bold'])
-    cprint("")
-    cprint("Wybierz jedną z poniższych opcji:")
-    cprint("1. Ulepsz i skaluj zdjęcia Real-ESRGAN")
-    cprint("2. Zmniejszanie rozmiaru w MB i px")
-    cprint("3. Ulepsz i skaluj anime / film")
-    cprint("4. Wyświetl informacje o pliku wideo lub audio")
-    cprint("5. Konwertuj audio i obraz do wideo")
-
-    choice = input("Wybierz numer opcji: ")
-
-    if choice == '1':
-        # hight_quality_image_real_esrgan_x4_plus_anime()
-        # fast_image_real_esrgan_animevideov3_x4()
-        # fast_image_real_esrgan_animevideov3_x4_jpg()
-        # slow_image_real_esrgan_x4_plus()
-
-        print("Wybierz jedną z poniższych opcji:")
-        print("1. hight_quality_image_real_esrgan_x4_plus_anime - Model do anime artów")
-        print("2. fast_image_real_esrgan_animevideov3_x4 - Gorszy model do anime artów")
-        print("3. fast_image_real_esrgan_animevideov3_x4_jpg - Szybki, model do anime artów, gorsza jakość")
-        print(
-            "4. slow_image_real_esrgan_x4_plus - Wolny model do wszylkiego rodzaju obrazów")
-        model = input("Wybierz numer opcji: ")
-
-        if model == '1':
-            hight_quality_image_real_esrgan_x4_plus_anime()
-
-        if model == '2':
-            fast_image_real_esrgan_animevideov3_x4()
-
-        if model == '3':
-            fast_image_real_esrgan_animevideov3_x4_jpg()
-
-        if model == '4':
-            slow_image_real_esrgan_x4_plus()
-
-    if choice == '2':
-        smaller_image()
-
-    if choice == '3':
-        filename, fps = add_info()
-        video_to_frames(filename)
-
-        # fast_image_real_esrgan_animevideov3_x4_jpg_with_temp_folder()  # 8K
-        # fast_image_real_esrgan_animevideov3_x3_jpg_with_temp_folder()  # 4K
-        # fast_image_real_esrgan_animevideov3_x2_jpg_with_temp_folder()  # 2K
-        # hight_quality_image_real_esrgan_x4_plus_animevideo()  # 8K high quality slow
-
-        print("Wybierz jedną z poniższych opcji:")
-        print("1. fast_image_real_esrgan_animevideov3_x4_jpg_with_temp_folder - Anime 1080p -> 4K")
-        print("2. fast_image_real_esrgan_animevideov3_x3_jpg_with_temp_folder - Anime 1080p -> 3K")
-        print("3. fast_image_real_esrgan_animevideov3_x2_jpg_with_temp_folder - Anime 1080p -> 2K")
-        print("4. hight_quality_image_real_esrgan_x4_plus_animevideo - Film 1080p -> 8K, bardzo, bardzo wolno")
-        model = input("Wybierz numer opcji: ")
-
-        if model == '1':
-            fast_image_real_esrgan_animevideov3_x4_jpg_with_temp_folder()
-
-        if model == '2':
-            fast_image_real_esrgan_animevideov3_x3_jpg_with_temp_folder()
-
-        if model == '3':
-            fast_image_real_esrgan_animevideov3_x2_jpg_with_temp_folder()
-
-        if model == '4':
-            hight_quality_image_real_esrgan_x4_plus_animevideo()
-
-        frames_to_video_with_sound(filename, fps)
-        # clean()
-
-    if choice == '4':
-        video_info()
-
-    if choice == '5':
-        audio_with_image()
-
-    # Mierz czas
-    print("--- %s seconds ---" % (time.time() - start_time))
-    print("--- %s minutes ---" % ((time.time() - start_time) / 60))
-    print("--- %s hours ---" % ((time.time() - start_time) / 3600))
+    success: bool = upscaler.upscale_folder(input_folder, output_folder)
+    if success:
+        console.print("Obrazy zostały pomyślnie upskalowane! 🎉",
+                      style="green_bold")
+    else:
+        console.print(
+            "Wystąpił błąd podczas upskalowania obrazów. 😞", style="red_bold")
 
 
 if __name__ == "__main__":
