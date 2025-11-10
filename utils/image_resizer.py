@@ -126,7 +126,7 @@ def main() -> None:
             )
             resizer.resize_image()
 
-    print("Zakończono przetwarzanie wszystkich obrazów. 😊🖼️✨")
+    print("Zakończono przetwarzanie wszystkich obrazów.")
 
 
 if __name__ == "__main__":
